@@ -18,12 +18,12 @@ diff --git a/libavformat/rtpdec.c b/libavformat/rtpdec.c
 index 8d4532ec30..cf76e8a5c0 100644
 --- a/libavformat/rtpdec.c
 +++ b/libavformat/rtpdec.c
-@@ -633,6 +633,13 @@ static void finalize_packet(RTPDemuxContext *s, AVPacket *pkt, uint32_t timestam
-     if (timestamp == RTP_NOTS_VALUE)
-         return;
- 
+@@ -666,6 +666,13 @@ static void finalize_packet(RTPDemuxContext *s, AVPacket *pkt, uint32_t timestam
+         }
+     }
+
 +    if (s->smpte2110_ts) {
-+        pkt->pts = smpte2110_compute_pts(s->ic, s->smpte2110_ts, timestamp,
++        pkt->pts = av_smpte2110_compute_pts(s->ic, s->smpte2110_ts, timestamp,
 +                                         s->st->time_base);
 +        if (pkt->pts != AV_NOPTS_VALUE)
 +            return;
@@ -32,13 +32,13 @@ index 8d4532ec30..cf76e8a5c0 100644
      if (s->last_rtcp_ntp_time != AV_NOPTS_VALUE && s->ic->nb_streams > 1) {
          int64_t addend;
          int delta_timestamp;
-@@ -757,6 +764,15 @@ void ff_rtp_reset_packet_queue(RTPDemuxContext *s)
+@@ -790,6 +797,15 @@ void ff_rtp_reset_packet_queue(RTPDemuxContext *s)
      s->prev_ret  = 0;
  }
  
 +int ff_rtp_enable_smpte2110_timestamp(RTPDemuxContext *s)
 +{
-+    s->smpte2110_ts = smpte2110_alloc();
++    s->smpte2110_ts = av_smpte2110_alloc();
 +    if (!s->smpte2110_ts)
 +        return AVERROR(ENOMEM);
 +
@@ -52,28 +52,28 @@ diff --git a/libavformat/rtpdec.h b/libavformat/rtpdec.h
 index e1ced132db..ae1337dcf4 100644
 --- a/libavformat/rtpdec.h
 +++ b/libavformat/rtpdec.h
-@@ -24,6 +24,7 @@
+@@ -24,7 +24,8 @@
  #define AVFORMAT_RTPDEC_H
- 
- #include "libavcodec/avcodec.h"
+
+ #include "libavcodec/codec_id.h"
+ #include "libavcodec/packet.h"
 +#include "libavutil/smpte2110.h"
  #include "avformat.h"
  #include "rtp.h"
  #include "url.h"
-@@ -51,6 +52,7 @@ int ff_rtp_parse_packet(RTPDemuxContext *s, AVPacket *pkt,
+@@ -52,6 +53,7 @@ int ff_rtp_parse_packet(RTPDemuxContext *s, AVPacket *pkt,
  void ff_rtp_parse_close(RTPDemuxContext *s);
  int64_t ff_rtp_queued_packet_time(RTPDemuxContext *s);
  void ff_rtp_reset_packet_queue(RTPDemuxContext *s);
 +int ff_rtp_enable_smpte2110_timestamp(RTPDemuxContext *s);
- 
+
  /**
   * Send a dummy packet on both port pairs to set up the connection
-@@ -190,6 +192,8 @@ struct RTPDemuxContext {
- 
-     /* packet loss tracking */
-     uint64_t rtp_packets_missed;
+@@ -188,5 +191,7 @@ struct RTPDemuxContext {
+     const RTPDynamicProtocolHandler *handler;
+     PayloadContext *dynamic_protocol_context;
 +
-+    struct smpte2110_timestamp *smpte2110_ts;
++    struct av_smpte2110_timestamp *smpte2110_ts;
  };
  
  /**
@@ -81,18 +81,18 @@ diff --git a/libavformat/rtsp.c b/libavformat/rtsp.c
 index 25bdf475b3..d911735ce1 100644
 --- a/libavformat/rtsp.c
 +++ b/libavformat/rtsp.c
-@@ -74,8 +74,8 @@
+@@ -77,8 +77,8 @@
  #define COMMON_OPTS() \
      { "reorder_queue_size", "set number of packets to buffer for handling of reordered packets", OFFSET(reordering_queue_size), AV_OPT_TYPE_INT, { .i64 = -1 }, -1, INT_MAX, DEC }, \
      { "buffer_size",        "Underlying protocol send/receive buffer size",                  OFFSET(buffer_size),           AV_OPT_TYPE_INT, { .i64 = -1 }, -1, INT_MAX, DEC|ENC }, \
--    { "pkt_size",           "Underlying protocol send packet size",                          OFFSET(pkt_size),              AV_OPT_TYPE_INT, { .i64 = -1 }, -1, INT_MAX, ENC } \
+-    { "pkt_size",           "Underlying protocol send packet size",                          OFFSET(pkt_size),              AV_OPT_TYPE_INT, { .i64 = 1472 }, -1, INT_MAX, ENC } \
 -
-+    { "pkt_size",           "Underlying protocol send packet size",                          OFFSET(pkt_size),              AV_OPT_TYPE_INT, { .i64 = -1 }, -1, INT_MAX, ENC }, \
++    { "pkt_size",           "Underlying protocol send packet size",                          OFFSET(pkt_size),              AV_OPT_TYPE_INT, { .i64 = 1472 }, -1, INT_MAX, ENC }, \
 +    { "smpte2110_timestamp", "Compute PTS based on RTP timestamps, according to SMPTE2110 spec", OFFSET(compute_smpte2110_timestamp), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, DEC}
  
  const AVOption ff_rtsp_options[] = {
      { "initial_pause",  "do not start playing the stream immediately", OFFSET(initial_pause), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1, DEC },
-@@ -859,10 +859,13 @@ int ff_rtsp_open_transport_ctx(AVFormatContext *s, RTSPStream *rtsp_st)
+@@ -856,10 +856,13 @@ int ff_rtsp_open_transport_ctx(AVFormatContext *s, RTSPStream *rtsp_st)
          rtsp_st->transport_priv = ff_rdt_parse_open(s, st->index,
                                              rtsp_st->dynamic_protocol_context,
                                              rtsp_st->dynamic_handler);
@@ -111,18 +111,16 @@ diff --git a/libavformat/rtsp.h b/libavformat/rtsp.h
 index 1310dd9c08..7a3d13b8cd 100644
 --- a/libavformat/rtsp.h
 +++ b/libavformat/rtsp.h
-@@ -419,6 +419,11 @@ typedef struct RTSPState {
-     char default_lang[4];
-     int buffer_size;
+@@ -419,5 +419,10 @@ typedef struct RTSPState {
      int pkt_size;
+     char *localaddr;
 +
 +    /**
 +     * Derive PTS from the RTP timestamp, according to spec SMPTE2110
 +     */
 +    int compute_smpte2110_timestamp;
  } RTSPState;
- 
+
  #define RTSP_FLAG_FILTER_SRC  0x1    /**< Filter incoming UDP packets -
 -- 
 2.25.1
-

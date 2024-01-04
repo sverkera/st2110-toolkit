@@ -24,32 +24,16 @@ fi
 install_yasm()
 {
     echo "Installing YASM"
-    DIR=$(mktemp -d)
-    cd $DIR/
-    curl -s http://www.tortall.net/projects/yasm/releases/yasm-$YASM_VERSION.tar.gz |
-        tar zxvf - -C .
-    cd $DIR/yasm-$YASM_VERSION/
-    ./configure --prefix="$PREFIX" --bindir="$PREFIX/bin" --docdir=$DIR -mandir=$DIR
-    make
-    make install
-    make distclean
-    rm -rf $DIR
+    $PACKAGE_MANAGER -y install yasm
 }
 
 install_nasm()
 {
     echo "Installing NASM"
-    if [ $PACKAGE_MANAGER = "yum" ]; then
-        DIR=$(mktemp -d)
-        cd $DIR/
-        nasm_rpm=nasm-$NASM_VERSION-0.fc24.x86_64.rpm
-        curl -O https://www.nasm.us/pub/nasm/releasebuilds/$NASM_VERSION/linux/$nasm_rpm
-        rpm -i $nasm_rpm
-        rm -f $nasm_rpm
-        rm -rf $DIR
-    else
-        $PACKAGE_MANAGER -y install nasm
+    if [ $OS = "almalinux" ]; then
+        dnf config-manager --set-enabled crb
     fi
+    $PACKAGE_MANAGER -y install nasm
 }
 
 install_x264()
@@ -133,16 +117,16 @@ install_ffmpeg()
     dir=$(pwd)
 
     ldconfig -v
-    echo "Installing ffmpeg"
     DIR=$(mktemp -d)
+    echo "Installing ffmpeg, building in $DIR"
     cd $DIR/
     git clone https://git.ffmpeg.org/ffmpeg.git
     cd ffmpeg
     git checkout -b $FFMPEG_VERSION origin/release/$FFMPEG_VERSION
 
     patch -p1 < $dir/transcoder/ffmpeg-force-input-threading.patch
-    #patch -p1 < $dir/transcoder/ffmpeg-avformat-rtp-compute-smpte2110-timestamps.patch
-    #patch -p1 < $dir/transcoder/ffmpeg-ffmpeg-avformat-rtp-compute-smpte2110-timestamps.patch
+    patch -p1 < $dir/transcoder/ffmpeg-avformat-rtp-compute-smpte2110-timestamps.patch
+    patch -p1 < $dir/transcoder/ffmpeg-avutil-smpte2110-add-helpers-to-compute-PTS.patch
 
     ./configure --prefix=$PREFIX \
         --extra-cflags=-I$PREFIX/include \

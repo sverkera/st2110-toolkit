@@ -31,13 +31,18 @@ fi
 
 TOP_DIR=$(dirname $(readlink -f $0))
 ST2110_CONF_FILE=/etc/st2110.conf
-OS=$(cat "/etc/os-release" | sed -n 's/^ID=\(.*\)/\1/p')
-echo "OS: $OS detected"
+OS=$(cat "/etc/os-release" | sed -n 's/^ID="*\(\w*\)"*/\1/p')
+RELEASEVER=$(cat "/etc/os-release" | sed -n 's/^VERSION_ID="*\([0-9]\+\)\.[0-9]\+"*/\1/p')
+echo "OS: $OS $RELEASEVER detected"
 
 if [ $OS = "debian" -o $OS = "ubuntu" ]; then
     PACKAGE_MANAGER=apt
-elif [ $OS = "centos" -o $OS = "redhat" ]; then
-    PACKAGE_MANAGER=yum
+elif [ $OS = "centos" -o $OS = "redhat" -o $OS = "almalinux" -o $OS = "rocky" ]; then
+    if [ $RELEASEVER -lt 8 ]; then
+	PACKAGE_MANAGER=yum
+    else
+	PACKAGE_MANAGER=dnf
+    fi
 else
     echo "OS not supported."
     exit 1
@@ -68,21 +73,23 @@ install_common_tools()
         ethtool \
         gcc \
         git \
+        $(if [ $RELEASEVER -gt 7 ]; then echo "initscripts"; fi) \
         jq \
         libtool \
         make \
         net-tools \
         patch \
         perl \
-        python-is-python3 \
+        $(if [ $RELEASEVER -lt 8 ]; then echo "python-is-python3"; else echo "python3"; fi) \
         sshpass \
         tar \
         tcpdump \
         tmux \
         wget \
-        wireshark-common
+        $(if [ $RELEASEVER -lt 8 ]; then echo "wireshark-common"; else echo "wireshark-cli"; fi)
 
-    if [ $PACKAGE_MANAGER = "yum" ]; then
+
+    if [ $PACKAGE_MANAGER = "yum" -o $PACKAGE_MANAGER = "dnf" ]; then
         $PACKAGE_MANAGER -y update && $PACKAGE_MANAGER install -y \
             nc \
             gcc-c++ \
@@ -108,8 +115,12 @@ install_common_tools()
 install_dev_tools()
 {
     if [ $PACKAGE_MANAGER = "yum" ]; then
-        wget dl.fedoraproject.org/pub/epel/7/x86_64/Packages/e/epel-release-7-11.noarch.rpm
-        rpm -ihv epel-release-7-11.noarch.rpm
+        if [ $RELEASEVER -lt 8 ]; then
+            wget dl.fedoraproject.org/pub/epel/7/x86_64/Packages/e/epel-release-7-11.noarch.rpm
+            rpm -ihv epel-release-7-11.noarch.rpm
+        else
+	    $PACKAGE_MANAGER -y install epel-release
+        fi
     fi
 
     $PACKAGE_MANAGER -y install \
@@ -147,7 +158,7 @@ install_config()
     fi
 
     install -m 755 $TOP_DIR/config/st2110.init /etc/init.d/st2110
-    update-rc.d st2110 defaults
+    #update-rc.d st2110 defaults
     systemctl enable st2110
 }
 
